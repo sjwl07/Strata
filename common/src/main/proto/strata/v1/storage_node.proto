@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package strata.v1;
+
+option java_multiple_files = true;
+option java_package = "io.strata.proto.v1";
+
+// Read API served by every storage node. Writes never come through here:
+// data arrives only through bulk pushes (batch) and Kafka (stream).
+service StorageNode {
+  rpc Get(GetRequest) returns (GetResponse);
+  rpc BatchGet(BatchGetRequest) returns (BatchGetResponse);
+}
+
+message GetRequest {
+  // Logical store name. Ignored until multiple stores exist (Phase 4).
+  string store = 1;
+  bytes key = 2;
+}
+
+message GetResponse {
+  bool found = 1;
+  bytes value = 2;
+  ServerFeedback feedback = 3;
+}
+
+message BatchGetRequest {
+  string store = 1;
+  repeated bytes keys = 2;
+}
+
+message BatchGetResponse {
+  // One entry per requested key, in request order.
+  repeated KeyValue entries = 1;
+  ServerFeedback feedback = 2;
+}
+
+message KeyValue {
+  bytes key = 1;
+  bool found = 2;
+  bytes value = 3;
+}
+
+// Load signals piggybacked on every response so the client can score
+// replicas (C3-style selection, Phase 5). Servers may leave this unset.
+message ServerFeedback {
+  uint32 queue_depth = 1;
+  uint64 service_time_micros = 2;
+}

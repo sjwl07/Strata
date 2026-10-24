@@ -1,0 +1,16 @@
+[versions]
+grpc = "1.68.1"
+protobuf = "3.25.5"
+
+[libraries]
+grpc-netty-shaded = { module = "io.grpc:grpc-netty-shaded", version.ref = "grpc" }
+grpc-protobuf = { module = "io.grpc:grpc-protobuf", version.ref = "grpc" }
+grpc-stub = { module = "io.grpc:grpc-stub", version.ref = "grpc" }
+grpc-inprocess = { module = "io.grpc:grpc-inprocess", version.ref = "grpc" }
+protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
+# Needed for @javax.annotation.Generated in gRPC-generated code.
+tomcat-annotations = { module = "org.apache.tomcat:annotations-api", version = "6.0.53" }
+
+[plugins]
+protobuf = { id = "com.google.protobuf", version = "0.9.4" }
+jmh = { id = "me.champeau.jmh", version = "0.7.2" }
