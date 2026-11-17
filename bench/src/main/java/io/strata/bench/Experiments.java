@@ -14,6 +14,7 @@ public final class Experiments {
     Args a = new Args(args, 1);
     switch (args[0]) {
       case "phase1" -> Phase1Baseline.run(a);
+      case "q1" -> Q1DeltaPush.run(a);
       case "q2" -> Q2MergeCorrectness.run(a);
       default -> throw new IllegalArgumentException("unknown experiment " + Arrays.toString(args));
     }

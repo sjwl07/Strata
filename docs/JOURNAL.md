@@ -154,3 +154,24 @@ After the fix, 0 leaked files. A real node receiving frequent pushes would have 
 | NAIVE | 19% |
 
 The skew row is the interesting one: correct code with a wrong operational assumption quietly serves stale data.
+
+## Phase 3: Delta pushes and Q1
+
+**Step 1: delta push in the push job** (written alongside the full push in Phase 1, tested now). Per partition: collect and sort both snapshots, then merge-join them. A key only in the old snapshot → `delete` marker in the SST; only in the new one → upsert; in both with different bytes → upsert. A partition with no changes ships no file at all.
+
+**Step 2: the node side of a delta** (`Manifests.fileChain`). A DELTA manifest points to its base version, and the node resolves the chain down to the last FULL push and ingests the files in order into a fresh RocksDB. Later files override earlier ones, and delete markers hide base keys.
+- The base files are already in the node's `FileCache` (pushed files are immutable), so only the delta is downloaded, and ingestion hard-links instead of copying.
+- **Why layer pristine files** instead of cloning the live (stream-updated) database: the clone would carry stream updates into the new version under the wrong watermark. The pristine chain plus replay (ADR 0004) gives exactly what a full push of the same snapshot gives.
+
+**Test:** `DeltaPushTest` pushes a FULL version, then two DELTAs (with deletes and keys coming back) and checks that every key equals the snapshot, and that **downloaded bytes == the two delta files exactly**.
+
+**Fix found here:** `StoreEngine.swap` kept old chain entries, so `pruneFileCache` never freed superseded versions' files. Now only the swapped-in version's chain is kept. (The code change landed in the Phase 2 commit because it touched the same file.)
+
+**Step 3: `PushJobMain`**, a CLI for the push job (TSV or synthetic input, full or delta).
+
+**Step 4: Q1 experiment** (`docs/experiments/q1-delta-push.md`).
+
+**Surprising result:** a delta ships 100× fewer bytes at f = 1%, but on this machine a full push finishes sooner end to end at *every* f. Building the delta requires reading both snapshots, which costs about 0.9 s extra regardless of f, more than the transfer it saves at 1 Gb/s.
+
+The crossover is therefore a bandwidth question: a delta wins when the bandwidth per copy is below about (1 − f) × 57 MB/s. That covers cross-region transfers, many replicas sharing one object store, and egress-priced clouds. Stacking 8 deltas didn't measurably slow point reads, thanks to Bloom filters.
+- **Learn:** report what you measured even when it contradicts the hypothesis. The useful output of Q1 is the crossover *formula*, not "deltas are good".
