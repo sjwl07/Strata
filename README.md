@@ -36,4 +36,8 @@ Requires JDK 21.
 5. Smart client and fault injection (Q3)
 6. Hardening, write-up, v0.1
 
-Design decisions live in [`docs/adr/`](docs/adr/).
+## Docs
+- [`docs/CONCEPTS.md`](docs/CONCEPTS.md): the project explained in plain language
+- [`docs/PLAN.md`](docs/PLAN.md): full plan, architecture, phases
+- [`docs/PROGRESS.md`](docs/PROGRESS.md): current status and log
+- [`docs/adr/`](docs/adr/): design decisions
