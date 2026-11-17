@@ -8,11 +8,13 @@ public final class Experiments {
 
   public static void main(String[] args) throws Exception {
     if (args.length == 0) {
-      System.err.println("usage: Experiments phase1|q1|q2|q3 [--opt=value ...]");
+      System.err.println("usage: bench demo|get|phase1|q1|q2|q3 [--opt=value ...]");
       System.exit(2);
     }
     Args a = new Args(args, 1);
     switch (args[0]) {
+      case "demo" -> Demo.run(a);
+      case "get" -> GetCommand.run(a);
       case "phase1" -> Phase1Baseline.run(a);
       case "q1" -> Q1DeltaPush.run(a);
       case "q2" -> Q2MergeCorrectness.run(a);

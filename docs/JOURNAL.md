@@ -235,3 +235,54 @@ After quiescing, **every replica of every partition** is read for every key (1,2
 - ZGC vs G1: about 30% lower p99.9, much smaller than the routing effect.
 
 **Bug found while running it:** the bench launcher hard-coded `-XX:+UseG1GC`, so passing `-XX:+UseZGC` crashed the JVM ("Multiple garbage collectors selected"). The default flag was removed (G1 is the JDK default anyway).
+
+## Phase 6: Hardening, usability, release
+
+**Step 1: profile the read path.** Added the `ReadPathBenchmark` JMH benchmark (engine `get`, no RPC) with JMH's `gc` and `stack` profilers (`-Pjmh.prof=gc,stack`).
+- **Finding:** about 2.5 µs per read, dominated by RocksDB's JNI `get`. The code was allocating 293 bytes per read, because `StoredValue.decode` copied the value into a second array and wrapped it in a `ByteBuffer`.
+- **Fix:** `Lookup` now carries the raw record plus an offset, and the service wraps that slice for protobuf with `UnsafeByteOperations.unsafeWrap`, a zero-copy wrap that's safe because the array is never modified.
+- **Result:** **293 → 168 B/op (−43%)**. Latency is unchanged within noise, as expected since JNI dominates, but less garbage means fewer GC pauses at high rates.
+- **Learn:** measure allocation with `-prof gc` (`gc.alloc.rate.norm` = bytes per operation); "unsafe" in `UnsafeByteOperations` means "you promise not to mutate the array".
+
+**Step 2: the quickstart** (`bench demo`): the Ravi story from CONCEPTS.md on a live 3-node cluster: push, stream an update, push a snapshot with an older cutoff (the update survives), `kill -9` a node (reads continue), bring it back empty (it's serving again in about 340 ms). `--mode=NAIVE` shows the update being lost.
+- **Bug found:** step 5 reported "not ready". `awaitServing` passed *before* the restarted node got its partitions back, because HRW only hands them back once the node heartbeats. The demo now waits for the node itself to be serving.
+
+**Step 3: real multi-process path.**
+- Added `strata-admin` (create-store / start-push / status / view) as a second launcher in the controller distribution, and `bench get`.
+- **Smoke-tested with 4 separate JVMs:** controller + 3 nodes, a full push and a delta push from TSV files (an update and a delete applied correctly), `kill -9` of a node, reads still correct, and the dead node dropped from the view.
+- `deploy/` has a Dockerfile and a compose file with Kafka. They're **untested here** (no Docker) and labelled as such.
+
+**Step 4: CI** runs the full build. GitHub runners have Docker, so the Kafka Testcontainers tests run there. It then runs a 40-history checker run and the demo.
+
+**Step 5: release.**
+- The client and `common` are publishable to Maven (`./gradlew :client:publishToMavenLocal`, coordinates `io.strata:strata-client:0.1.0`).
+- Wrote the README with headline results, `design.md` (a walkthrough with a code map), PROGRESS with a deviations table, and a blog draft (`docs/blog/`).
+- Tagged `v0.1.0` locally.
+
+---
+
+## How to review this project (suggested order)
+1. `README.md` → `docs/CONCEPTS.md` (the story) → `docs/design.md` (the mechanics).
+2. ADRs 0001–0006 in order. Each is one decision with the rejected alternatives.
+3. The core code, in this order:
+   - `common/StoredValue` (merge order);
+   - `storage-node/engine/PartitionVersion` (ref-counting);
+   - `PartitionReplica` (single writer, replay, dual-write, swap);
+   - `StoreEngine`;
+   - `controller/ControllerState`;
+   - `storage-node/ClusterAgent`;
+   - `client/StrataClient` + `ReplicaSelector.C3`.
+4. Tests as specifications: `MergeSemanticsTest` (read the scenarios), `VersionSwapTest`, `DeltaPushTest`, `ClusterFailoverTest`, `StrataClientTest`, `checker/Oracle`.
+5. The experiment write-ups (Phase 1, Q2, Q1, Q3).
+
+**Questions you should be able to answer afterwards** (likely interview questions):
+- Why is replaying from `W − skew` enough? What breaks if log retention is shorter than the cutoff-to-swap delay?
+- Why does LWW alone resurrect deleted keys, and why does the watermark filter fix it?
+- Why does every read do a CAS (`tryAcquire`), and what would crash without it?
+- Why a single writer thread per partition instead of locks?
+- Why level-triggered heartbeats? What happens if a heartbeat response is lost?
+- Why rendezvous hashing? What does it cost with few partitions?
+- Why did least-outstanding fail to avoid a slow node at low concurrency, and why does C3's cubic term help?
+- When does hedging hurt? Why does the token bucket need burst capacity?
+- In Q1, why did the full push win on time even though it ships 100× more bytes?
+- What does an open-loop load generator protect against (coordinated omission)?

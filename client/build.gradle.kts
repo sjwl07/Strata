@@ -12,3 +12,18 @@ dependencies {
     testImplementation(project(":local-cluster"))
     testImplementation(project(":fault"))
 }
+
+// The client is useful on its own: ./gradlew :client:publishToMavenLocal
+apply(plugin = "maven-publish")
+configure<JavaPluginExtension> {
+    withSourcesJar()
+    withJavadocJar()
+}
+configure<PublishingExtension> {
+    publications {
+        create<MavenPublication>("client") {
+            artifactId = "strata-client"
+            from(components["java"])
+        }
+    }
+}

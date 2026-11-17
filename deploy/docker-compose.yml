@@ -1,0 +1,57 @@
+# Multi-process Strata with a real Kafka broker. NOTE: written for machines with Docker; it was not
+# run on the development machine (no Docker daemon there, see ADR 0001). The in-process equivalent,
+# which is what the tests and experiments use, is `bench demo` / LocalCluster.
+#
+#   ./gradlew :controller:installDist :storage-node:installDist :push-job:installDist :bench:installDist
+#   docker compose -f deploy/docker-compose.yml up --build
+#   # create a store and push a version (from another shell):
+#   docker compose -f deploy/docker-compose.yml run --rm tools push-job \
+#       --objects=/objects --store=demo --partitions=8 --version=1 --synthetic-keys=100000
+#   (then StartPush through the controller API, e.g. with grpcurl -plaintext localhost:7000 ...)
+services:
+  kafka:
+    image: apache/kafka:3.8.1
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 48   # must exceed cutoff-to-swap delay + skew (ADR 0004)
+
+  controller:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    command: controller --port=7000 --node-timeout-ms=3000
+    ports: ["7000:7000"]
+
+  node1: &node
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    command: >
+      storage-node --node-id=node1 --host=node1 --port=7101 --data-dir=/data
+      --objects=/objects --controller=controller:7000 --kafka=kafka:9092
+    volumes: ["objects:/objects"]
+    depends_on: [controller, kafka]
+    ports: ["7101:7101"]
+  node2:
+    <<: *node
+    command: >
+      storage-node --node-id=node2 --host=node2 --port=7101 --data-dir=/data
+      --objects=/objects --controller=controller:7000 --kafka=kafka:9092
+    ports: ["7102:7101"]
+  node3:
+    <<: *node
+    command: >
+      storage-node --node-id=node3 --host=node3 --port=7101 --data-dir=/data
+      --objects=/objects --controller=controller:7000 --kafka=kafka:9092
+    ports: ["7103:7101"]
+
+  tools:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    profiles: ["tools"]
+    volumes: ["objects:/objects"]
+
+# The shared volume stands in for S3/MinIO (ADR 0001: ObjectStore is a local directory).
+volumes:
+  objects:

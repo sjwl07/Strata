@@ -4,6 +4,9 @@ plugins {
     id("com.diffplug.spotless")
 }
 
+group = "io.strata"
+version = "0.1.0"
+
 repositories {
     mavenCentral()
 }

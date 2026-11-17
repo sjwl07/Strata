@@ -107,10 +107,10 @@ public final class PartitionReplica implements AutoCloseable {
         if (raw == null) {
           return Lookup.missing(v.version());
         }
-        StoredValue sv = StoredValue.decode(raw);
-        return sv.tombstone()
+        // Zero-copy: hand back the stored record and where its value starts.
+        return StoredValue.isTombstone(raw)
             ? Lookup.missing(v.version())
-            : new Lookup(true, sv.value(), v.version());
+            : new Lookup(true, raw, StoredValue.VALUE_OFFSET, v.version());
       } catch (RocksDBException e) {
         throw new IllegalStateException("read failed", e);
       } finally {

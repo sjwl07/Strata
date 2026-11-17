@@ -1,5 +1,7 @@
 # Strata: project plan
 
+> **Status (2026-11-17):** all phases are built (v0.1.0). What was built differs from this plan in a few places because of the dev machine (no Docker, small disk); see the "Deviations" table in `PROGRESS.md`. This file is kept as the original plan.
+
 ## Why this project
 The user joins LinkedIn's online data infra team (Bangalore) in summer 2027. Their internship covered the *offline* path (Kafka → Flink → Iceberg → Spark). Strata covers the *online* path: serving derived and ML-feature data that is computed in bulk offline and also updated by streams. It's in Java, the role's language.
 

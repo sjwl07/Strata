@@ -15,6 +15,8 @@ dependencies {
     implementation(libs.grpc.netty.shaded)
     implementation(libs.hdrhistogram)
     jmh(project(":common"))
+    jmh(project(":storage-node"))
+    jmh(project(":push-job"))
 }
 
 // Experiments: ./gradlew :bench:run --args="phase1 [options]"   (see docs/experiments/)
@@ -28,5 +30,6 @@ jmh {
     jmhVersion = "1.37"
     providers.gradleProperty("jmh.includes").orNull?.let { includes = listOf(it) }
     providers.gradleProperty("jmh.threads").orNull?.let { threads = it.toInt() }
+    providers.gradleProperty("jmh.prof").orNull?.let { profilers = it.split(",") }
     resultFormat = "JSON"
 }

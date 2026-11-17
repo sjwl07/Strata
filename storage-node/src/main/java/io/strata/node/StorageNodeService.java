@@ -1,7 +1,6 @@
 package io.strata.node;
 
 import com.google.protobuf.ByteString;
-import com.google.protobuf.UnsafeByteOperations;
 import io.grpc.Context;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
@@ -52,7 +51,7 @@ public class StorageNodeService extends StorageNodeGrpc.StorageNodeImplBase {
   private static KeyLookup mapLookup(Map<ByteString, ByteString> data) {
     return (store, key) -> {
       ByteString v = data.get(ByteString.copyFrom(key));
-      return v == null ? Lookup.missing(0) : new Lookup(true, v.toByteArray(), 0);
+      return v == null ? Lookup.missing(0) : Lookup.of(v.toByteArray(), 0);
     };
   }
 
@@ -73,7 +72,7 @@ public class StorageNodeService extends StorageNodeGrpc.StorageNodeImplBase {
       Lookup r = lookup.get(request.getStore(), request.getKey().toByteArray());
       GetResponse.Builder b = GetResponse.newBuilder().setFound(r.found()).setVersion(r.version());
       if (r.found()) {
-        b.setValue(UnsafeByteOperations.unsafeWrap(r.value()));
+        b.setValue(r.valueBytes());
       }
       b.setFeedback(feedback(start));
       out.onNext(b.build());
@@ -108,7 +107,7 @@ public class StorageNodeService extends StorageNodeGrpc.StorageNodeImplBase {
         KeyValue.Builder kv =
             KeyValue.newBuilder().setKey(key).setFound(r.found()).setVersion(r.version());
         if (r.found()) {
-          kv.setValue(UnsafeByteOperations.unsafeWrap(r.value()));
+          kv.setValue(r.valueBytes());
         }
         b.addEntries(kv);
       }

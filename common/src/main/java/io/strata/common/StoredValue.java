@@ -53,6 +53,14 @@ public record StoredValue(long ts, int sourceId, boolean tombstone, byte[] value
     return new StoredValue(ts, source, tomb, Arrays.copyOfRange(bytes, HEADER, bytes.length));
   }
 
+  /** Offset of the value inside an encoded record. */
+  public static final int VALUE_OFFSET = HEADER;
+
+  /** True if an encoded record is a tombstone, without decoding it. */
+  public static boolean isTombstone(byte[] encoded) {
+    return (encoded[0] & TOMBSTONE) != 0;
+  }
+
   /** Reads only the timestamp/source header, for the hot merge path. */
   public static long tsOf(byte[] encoded) {
     return ByteBuffer.wrap(encoded, 1, 8).getLong();

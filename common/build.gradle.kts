@@ -27,3 +27,14 @@ protobuf {
         all().forEach { it.plugins { id("grpc") } }
     }
 }
+
+// Published with the client (the client's only project dependency).
+apply(plugin = "maven-publish")
+configure<PublishingExtension> {
+    publications {
+        create<MavenPublication>("common") {
+            artifactId = "strata-common"
+            from(components["java"])
+        }
+    }
+}
