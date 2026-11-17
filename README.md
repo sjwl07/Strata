@@ -32,66 +32,17 @@ Three questions, each answered with a reproducible experiment. All numbers come 
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph batch["① Batch path · periodic"]
-        direction TB
-        dataset[("Dataset<br/>snapshot")]
-        push["Push job<br/>partition · sort · build SSTs<br/>full or delta"]
-        objects[("Object store<br/>SST files + manifest")]
-        dataset --> push --> objects
-    end
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="Strata architecture: a batch path (dataset, push job, object store) and a stream path (producers, Kafka) feed a serving cluster of a controller and storage nodes; applications read through StrataClient." width="100%">
+</p>
 
-    subgraph stream["② Stream path · continuous"]
-        direction TB
-        producers["Producers"]
-        log[("Update log · Kafka<br/>one partition per<br/>store partition")]
-        producers --> log
-    end
+Data enters through two paths. The **batch path** periodically publishes a complete new version as SST files. The **stream path** delivers individual updates through Kafka. Every storage node hosts replicas of some partitions and combines both sources. The **controller** decides placement and when a new version goes live. Applications read through **StrataClient**, which picks the fastest replica using load feedback from the nodes.
 
-    subgraph serving["③ Serving cluster"]
-        direction TB
-        controller["Controller<br/>membership · placement<br/>push gate"]
-        nodes["Storage nodes<br/>RocksDB per partition version<br/>merge · replay · atomic swap"]
-        controller <-->|"heartbeats"| nodes
-    end
+### How a new version goes live
 
-    subgraph reads["④ Read path"]
-        direction TB
-        app["Application"]
-        client["StrataClient<br/>C3 replica choice<br/>hedging · failover"]
-        app --> client
-    end
-
-    push -->|"StartPush(v)"| controller
-    objects -->|"download + ingest"| nodes
-    log -->|"each replica consumes<br/>its partitions"| nodes
-    controller -.->|"cluster view"| client
-    client <-->|"Get / BatchGet<br/>+ load feedback"| nodes
-
-    classDef data fill:#dbeafe,stroke:#2563eb,color:#0f172a
-    classDef job fill:#fef3c7,stroke:#d97706,color:#0f172a
-    classDef svc fill:#dcfce7,stroke:#16a34a,color:#0f172a
-    classDef cli fill:#f3e8ff,stroke:#9333ea,color:#0f172a
-    class dataset,objects,log data
-    class push,producers job
-    class controller,nodes svc
-    class app,client cli
-```
-
-When a new version arrives, each storage node switches to it without losing a single stream update:
-
-```mermaid
-flowchart LR
-    a["v2 published<br/>(cutoff T)"] --> b["Ingest SSTs<br/>hard links, no copy"]
-    b --> c["Replay updates from<br/>T − max clock skew"]
-    c --> d["Dual-write live<br/>updates to v1 and v2"]
-    d --> e["Atomic swap<br/>readers move to v2"]
-    e --> f["v1 closed after its<br/>last reader finishes"]
-
-    classDef step fill:#dcfce7,stroke:#16a34a,color:#0f172a
-    class a,b,c,d,e,f step
-```
+<p align="center">
+  <img src="docs/images/version-swap.svg" alt="Timeline: v1 keeps serving while v2 ingests its SSTs, replays updates made after its cutoff from Kafka, and receives live updates, then an atomic swap makes v2 serve." width="100%">
+</p>
 
 Two rules make the merge correct:
 
