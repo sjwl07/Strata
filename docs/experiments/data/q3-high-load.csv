@@ -1,0 +1,11 @@
+fault,strategy,rate,p50_ms,p99_ms,p999_ms,max_ms,extra_load_pct,hedge_wins,errors
+slow-node,round-robin,5000,0.216,18.612,41.353,64.487,0.00,0,0
+slow-node,c3,5000,0.170,0.588,2.012,10.609,0.00,0,0
+slow-node,round-robin+hedge5%,5000,0.185,4.065,16.015,29.327,4.30,3136,0
+slow-node,c3+hedge5%,5000,0.181,0.646,2.460,5.591,0.12,14,0
+slow-node,round-robin+hedge-unbounded,5000,0.191,2.167,8.479,34.243,5.28,3820,0
+noisy-neighbours,round-robin,5000,0.191,200.671,291.504,343.671,0.00,0,0
+noisy-neighbours,c3,5000,0.182,0.698,5.988,12.239,0.00,0,0
+noisy-neighbours,round-robin+hedge5%,5000,0.187,73.269,182.190,213.516,1.05,699,0
+noisy-neighbours,c3+hedge5%,5000,0.175,0.508,1.959,5.349,0.08,10,0
+noisy-neighbours,round-robin+hedge-unbounded,5000,0.187,1.527,12.845,74.842,5.14,3757,0

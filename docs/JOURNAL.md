@@ -208,3 +208,30 @@ An in-flight map prevents starting the same load twice. `PartitionReplica.prepar
 - push v3 while they bootstrap.
 
 After quiescing, **every replica of every partition** is read for every key (1,200 replica-key checks) and compared with the true newest value: **0 wrong**. Rejoined nodes converge exactly through bootstrap = SST + replay from the watermark.
+
+## Phase 5: Smart client, fault injection, Q3
+
+**Step 1: `client` module**, deliberately depending only on the API protos, gRPC and HdrHistogram so it can be published on its own.
+- `ReplicaStats`: per replica, in-flight count plus EWMAs (exponentially weighted moving averages) of latency, server service time and server queue depth.
+- `ReplicaSelector`: round-robin, random, least-outstanding, and **C3** (`R − S + q̂³·S`). It ranks rather than picks, because the 2nd and 3rd replicas are needed for hedging and failover.
+- `TokenBucket`: the hedge budget (deposit `budget` per primary, spend 1 per hedge).
+- `StrataClient`: the cluster view poller, channel pool and the `Call` state machine (primary → maybe a hedge after the adaptive p95 delay → failover on `UNAVAILABLE` → first success wins → cancel the losers). `batchGet` is scatter-gather by partition. ADR 0006.
+- **Learn:** gRPC `FutureStub` + Guava `ListenableFuture.cancel(true)` sends RST_STREAM and the server sees `Context.isCancelled()`; `ScheduledThreadPoolExecutor.setRemoveOnCancelPolicy(true)` (otherwise thousands of cancelled hedge timers sit in the queue); HdrHistogram `Recorder` for lock-free interval percentiles.
+
+**Step 2: `fault` module.** `ServeHook`s for slow disk (probabilistic delay), stop-the-world pauses (GC-like freeze windows) and noisy neighbours (random episodes). They run on the serving thread, so a slow request really occupies a worker and queues build behind it.
+
+**Step 3: client tests against a real 3-node cluster:**
+- correct `get`/`batchGet`;
+- **C3 sends only 4%** of requests to a replica slowed by 15 ms (round-robin would send 33%);
+- **hedging cuts p99 from 80.6 to 36.8 ms** with one half-slow replica, within budget, with every loser cancelled;
+- zero errors when a node is killed (failover before the next view refresh).
+- **Small fix:** JUnit's `@TempDir` on an instance field isn't injected before `@BeforeAll` with `PER_CLASS` lifecycle, so the field became `static`.
+
+**Step 4: Q3** (`docs/experiments/q3-tail-latency.md`): 6 nodes with 2 serving threads each, open-loop Zipfian load, 4 fault scenarios × 6 strategies, a high-load rerun, and G1 vs ZGC.
+- **C3 alone** keeps p99 about 0.6 ms in every scenario: **17–63× better than round-robin**, at zero extra load.
+- **Hedging** fixes load-blind routing for about 3% extra load, but a 10-token bucket gets drained by bursty episodes. **Bucket capacity matters**, not just the rate.
+- **Hedging on top of C3 slightly hurt** under GC pauses (correlated backup bursts).
+- **The p95 hedge delay self-limits hedge volume** to about 5%, which is why "unbounded" didn't melt anything here.
+- ZGC vs G1: about 30% lower p99.9, much smaller than the routing effect.
+
+**Bug found while running it:** the bench launcher hard-coded `-XX:+UseG1GC`, so passing `-XX:+UseZGC` crashed the JVM ("Multiple garbage collectors selected"). The default flag was removed (G1 is the JDK default anyway).

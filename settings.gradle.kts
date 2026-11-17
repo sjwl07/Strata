@@ -9,6 +9,8 @@ include(
     "kafka-log",
     "controller",
     "local-cluster",
+    "client",
+    "fault",
     "checker",
     "bench",
 )

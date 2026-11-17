@@ -16,6 +16,7 @@ public final class Experiments {
       case "phase1" -> Phase1Baseline.run(a);
       case "q1" -> Q1DeltaPush.run(a);
       case "q2" -> Q2MergeCorrectness.run(a);
+      case "q3" -> Q3TailLatency.run(a);
       default -> throw new IllegalArgumentException("unknown experiment " + Arrays.toString(args));
     }
     System.exit(0);

@@ -9,6 +9,9 @@ dependencies {
     implementation(project(":push-job"))
     implementation(project(":storage-node"))
     implementation(project(":checker"))
+    implementation(project(":client"))
+    implementation(project(":fault"))
+    implementation(project(":local-cluster"))
     implementation(libs.grpc.netty.shaded)
     implementation(libs.hdrhistogram)
     jmh(project(":common"))
@@ -17,7 +20,7 @@ dependencies {
 // Experiments: ./gradlew :bench:run --args="phase1 [options]"   (see docs/experiments/)
 application {
     mainClass = "io.strata.bench.Experiments"
-    applicationDefaultJvmArgs = listOf("-Xmx1g", "-XX:+UseG1GC")
+    applicationDefaultJvmArgs = listOf("-Xmx1g") // GC chosen via JAVA_OPTS (G1 is the default)
 }
 
 // Micro-benchmarks: ./gradlew :bench:jmh -Pjmh.includes=MapBenchmark -Pjmh.threads=4
