@@ -98,3 +98,59 @@ The 5 acceptance tests pass.
 - **ingest: 0.17 s**, because hard-linked SSTs mean no rewrite;
 - p50 about 0.15 ms and p99 about 0.4–1.2 ms up to 20k req/s, with saturation at 40k (client and server share 8 threads);
 - the swap under load costs a p99 blip of 0.38 → 0.76 ms for one second, with zero errors.
+
+## Phase 2: Streaming merge and the correctness checker
+
+**Step 1: pin the merge rules down with scenario tests** (`MergeSemanticsTest`, 10 tests). Each test is one story on a fake clock:
+- the Ravi timeline from CONCEPTS.md;
+- a late event not overwriting a newer one;
+- a delete not being undone by an older late write;
+- a pre-cutoff write not resurrecting a key that is absent from the snapshot;
+- duplicates being idempotent;
+- updates arriving between prepare and swap still reaching the new version;
+- bootstrap replaying from the watermark.
+
+The same tests show the anomalies of the weaker modes (NAIVE/LWW lose Ravi's update, and LWW resurrects deleted keys).
+- **Why tests before the checker:** they document the semantics in readable form. The checker then hunts for cases nobody thought of.
+- **Decisions:** ADR 0003 (LWW total order + watermark filter + definition of correct) and ADR 0004 (replay from `W − skew`, then dual-write until swap).
+
+**Step 2: the checker (`checker` module).**
+- `HistoryGenerator` makes seeded random histories with every kind of mess at once: late events (10%, up to 3 s), future-dated events from producer clock skew (5%, up to 200 ms), duplicates (3%), deletes (10%), 3 producers, pushes whose cutoff is 0.3–2 s before arrival, a random delay between prepare and swap, and random crash-and-rebuild of a replica.
+- `Oracle` defines the right answer (ADR 0003).
+- `Checker` replays a history against **two real replicas** consuming the same log. At every check point it reads every key from both and classifies wrong answers: `STALE`, `RESURRECTED`, `LOST`, `REGRESSED` (a value went back in time) and `DIVERGED` (the replicas disagree at the end).
+- `CheckerTest` is the CI gate: FULL must have zero anomalies, **and the weaker modes must show anomalies**. Otherwise a green FULL run could just mean the checker is blind.
+- **Learn:** sealed interfaces + records + pattern-matching `switch` (`History.Action`): the Java 21 way to write "one of these kinds of thing".
+
+**Step 3: `kafka-log`**, the real Kafka adapter. Its design choices:
+- `LogAppendTime` topics, because replay needs the broker's clock, not the producer's;
+- manual partition assignment instead of consumer groups, because every replica must read every record;
+- one consumer per (thread, partition), because `KafkaConsumer` isn't thread-safe.
+
+The tests use Testcontainers and skip without Docker (as on this machine).
+- Later, I moved the engine-level Kafka test into `storage-node` so that `storage-node` can depend on `kafka-log` without a Gradle project cycle.
+
+**Bug 1 found by running Q2 (a real production bug):** the experiment filled the disk, leaving under 600 MB free at one point. `/proc/<pid>/fd` showed about 9,000 *deleted but still open* files: retired RocksDB instances weren't being closed fast enough. Causes:
+1. With the WAL disabled, `RocksDB.close()` *flushes memtables to disk with fsync*, so closes were slower than the checker created new versions, and the single cleaner thread fell behind forever.
+2. Each instance `fallocate`s about 9 MB for its log file even though we never write a WAL.
+
+**Fix:**
+- `setAvoidFlushDuringShutdown(true)`, which is safe because state is rebuildable (ADR 0002);
+- `setAllowFAllocate(false)`;
+- 2 cleaner threads;
+- an exact pending-close counter that callers can wait on (`awaitCleaner`).
+
+After the fix, 0 leaked files. A real node receiving frequent pushes would have hit the same leak.
+
+**Bug 2:** a race between the checker deleting a history's directory and a cleaner thread deleting a version inside it (`NoSuchFileException`). Recursive delete now tolerates files vanishing mid-walk, and `awaitCleaner` waits on the counter instead of a racy "submit a no-op" barrier.
+- **Learn:** deleted-but-open files (Unix keeps the data until the last fd closes), and `ls -l /proc/PID/fd | grep deleted` as the way to find them.
+
+**Step 4: Q2 experiment** (`bench q2`, write-up in `docs/experiments/q2-merge-correctness.md`). Across 50 histories and 501k checked reads per mode:
+
+| Mode | Wrong reads |
+|---|---|
+| FULL | **0** |
+| FULL with a wrong skew bound | 0.05% |
+| LWW only | 8.5% |
+| NAIVE | 19% |
+
+The skew row is the interesting one: correct code with a wrong operational assumption quietly serves stale data.

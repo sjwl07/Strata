@@ -151,6 +151,7 @@ final class Phase1Baseline {
       System.out.printf("prepare started at t=%ds and took %d ms%n", swapAtSec[0], prepMs[0]);
       ch.shutdownNow();
     }
+    Files2.deleteRecursively(work);
   }
 
   private static String row(String dist, double rate, Histogram h, long errors) {

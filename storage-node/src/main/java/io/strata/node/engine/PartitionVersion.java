@@ -3,11 +3,9 @@ package io.strata.node.engine;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
 import org.rocksdb.IngestExternalFileOptions;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
@@ -134,7 +132,7 @@ public final class PartitionVersion {
 
   void release() {
     if (refs.decrementAndGet() == 0) {
-      resources.cleaner().execute(this::destroy);
+      resources.scheduleClose(this::destroy);
     }
   }
 
@@ -155,15 +153,44 @@ public final class PartitionVersion {
     }
   }
 
+  /** Deletes a tree; files that vanish concurrently (another cleaner) are not an error. */
   static void deleteRecursively(Path p) throws IOException {
     if (!Files.exists(p)) {
       return;
     }
-    try (Stream<Path> s = Files.walk(p)) {
-      for (Path x : s.sorted(Comparator.reverseOrder()).toList()) {
-        Files.deleteIfExists(x);
-      }
-    }
+    Files.walkFileTree(
+        p,
+        new java.nio.file.SimpleFileVisitor<>() {
+          @Override
+          public java.nio.file.FileVisitResult visitFile(
+              Path f, java.nio.file.attribute.BasicFileAttributes a) throws IOException {
+            Files.deleteIfExists(f);
+            return java.nio.file.FileVisitResult.CONTINUE;
+          }
+
+          @Override
+          public java.nio.file.FileVisitResult visitFileFailed(Path f, IOException e)
+              throws IOException {
+            if (e instanceof java.nio.file.NoSuchFileException) {
+              return java.nio.file.FileVisitResult.CONTINUE;
+            }
+            throw e;
+          }
+
+          @Override
+          public java.nio.file.FileVisitResult postVisitDirectory(Path d, IOException e)
+              throws IOException {
+            if (e != null && !(e instanceof java.nio.file.NoSuchFileException)) {
+              throw e;
+            }
+            try {
+              Files.deleteIfExists(d);
+            } catch (java.nio.file.DirectoryNotEmptyException ignored) {
+              // a concurrent writer added a file; the caller's next cleanup gets it
+            }
+            return java.nio.file.FileVisitResult.CONTINUE;
+          }
+        });
   }
 
   @Override

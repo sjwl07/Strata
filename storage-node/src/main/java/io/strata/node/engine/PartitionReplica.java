@@ -56,6 +56,7 @@ public final class PartitionReplica implements AutoCloseable {
 
   // Worker-confined state: only the worker thread reads or writes these.
   private PartitionVersion future;
+  private volatile long preparedVersion = -1; // mirrors future's version, readable by any thread
   private long nextOffset = -1; // -1: not consuming the log yet (no version installed)
 
   // Metrics (read from any thread).
@@ -122,6 +123,11 @@ public final class PartitionReplica implements AutoCloseable {
   public long currentVersion() {
     PartitionVersion v = current.get();
     return v == null ? -1 : v.version();
+  }
+
+  /** Version loaded, caught up and waiting for {@link #swap}, or -1. */
+  public long preparedVersion() {
+    return preparedVersion;
   }
 
   /** How many log records behind the end of the log this replica is (0 if no log). */
@@ -194,6 +200,7 @@ public final class PartitionReplica implements AutoCloseable {
           }
           PartitionVersion old = current.getAndSet(future);
           future = null;
+          preparedVersion = -1;
           if (old != null) {
             old.retire();
           }
@@ -243,6 +250,7 @@ public final class PartitionReplica implements AutoCloseable {
       }
     }
     future = v;
+    preparedVersion = v.version();
     return null;
   }
 

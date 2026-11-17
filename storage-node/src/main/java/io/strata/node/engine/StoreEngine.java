@@ -194,7 +194,9 @@ public final class StoreEngine implements AutoCloseable {
                     () -> {
                       Map<Long, List<String>> c = chains.get(p);
                       if (c != null) {
-                        c.keySet().removeIf(v -> v < version);
+                        // After a swap only the served version's files are needed (a prepare
+                        // racing with this swap re-registers its chain when it fetches).
+                        c.keySet().removeIf(v -> v != version);
                       }
                     }));
       }

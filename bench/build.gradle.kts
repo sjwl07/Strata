@@ -8,6 +8,7 @@ dependencies {
     implementation(project(":common"))
     implementation(project(":push-job"))
     implementation(project(":storage-node"))
+    implementation(project(":checker"))
     implementation(libs.grpc.netty.shaded)
     implementation(libs.hdrhistogram)
     jmh(project(":common"))

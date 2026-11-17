@@ -1,0 +1,12 @@
+what,mode,events,seconds,extra
+apply,NAIVE,300000,0.173,1729716
+apply,LWW,300000,0.702,427308
+apply,FULL,300000,0.694,432064
+prepare,FULL,0,0.269,0
+prepare,LWW,0,0.258,0
+prepare,FULL,10000,0.270,10000
+prepare,LWW,10000,0.267,0
+prepare,FULL,100000,0.413,100000
+prepare,LWW,100000,0.221,0
+prepare,FULL,300000,1.115,300000
+prepare,LWW,300000,0.188,0

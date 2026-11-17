@@ -28,7 +28,8 @@ public final class RocksResources implements AutoCloseable {
   private final WriteBufferManager writeBuffers;
   private final WriteOptions writeOptions;
   private final ExecutorService cleaner =
-      Executors.newSingleThreadExecutor(
+      Executors.newFixedThreadPool(
+          2,
           r -> {
             Thread t = new Thread(r, "rocks-cleaner");
             t.setDaemon(true);
@@ -58,16 +59,40 @@ public final class RocksResources implements AutoCloseable {
         .setCompressionType(CompressionType.LZ4_COMPRESSION)
         .setInfoLogLevel(InfoLogLevel.WARN_LEVEL)
         .setKeepLogFileNum(1)
-        .setMaxBackgroundJobs(2);
+        .setMaxBackgroundJobs(2)
+        // State is rebuildable (no WAL), so closing must not flush memtables to disk: that made
+        // closes slower than opens under churn, and retired instances piled up (journal, Phase 2).
+        .setAvoidFlushDuringShutdown(true)
+        // Don't preallocate WAL/SST space with fallocate: each open instance reserved ~9 MB.
+        .setAllowFAllocate(false)
+        .setAvoidUnnecessaryBlockingIO(true);
   }
 
   WriteOptions writeOptions() {
     return writeOptions;
   }
 
-  /** Closes retired versions off the request path. */
-  ExecutorService cleaner() {
-    return cleaner;
+  private final java.util.concurrent.atomic.AtomicInteger pendingCloses =
+      new java.util.concurrent.atomic.AtomicInteger();
+
+  /** Closes a retired instance on a cleaner thread (never on the request path). */
+  void scheduleClose(Runnable destroy) {
+    pendingCloses.incrementAndGet();
+    cleaner.execute(
+        () -> {
+          try {
+            destroy.run();
+          } finally {
+            pendingCloses.decrementAndGet();
+          }
+        });
+  }
+
+  /** Waits until every instance scheduled for closing so far has been closed. */
+  public void awaitCleaner() throws InterruptedException {
+    while (pendingCloses.get() > 0) {
+      Thread.sleep(1);
+    }
   }
 
   @Override

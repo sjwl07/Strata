@@ -40,3 +40,7 @@ spotless {
         googleJavaFormat("1.22.0")
     }
 }
+
+// `build` would otherwise zip + tar every runnable module (each ~80 MB because of the RocksDB
+// native jar). We run apps via `installDist` or `run`, so skip the archives.
+tasks.matching { it.name == "distZip" || it.name == "distTar" }.configureEach { enabled = false }
