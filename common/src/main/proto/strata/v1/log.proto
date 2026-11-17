@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package strata.v1;
+
+option java_multiple_files = true;
+option java_package = "io.strata.proto.v1";
+
+// One nearline update, as written to the update log (Kafka topic value).
+message UpdateEvent {
+  bytes key = 1;
+  bytes value = 2;
+  // true = delete the key (value is ignored).
+  bool delete = 3;
+  // Event time in milliseconds: when the change happened at the source.
+  int64 ts = 4;
+  // Identifies the writer; breaks ties between equal timestamps.
+  int32 source_id = 5;
+}

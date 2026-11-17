@@ -52,3 +52,49 @@ The 5 acceptance tests pass.
 - an `AtomicReference` version pointer;
 - a bounded platform-thread pool for reads, because RocksDB JNI calls pin virtual threads;
 - client callbacks moved off the gRPC threads.
+
+## Phase 1: Single-node versioned store
+
+**Step 1: shared building blocks in `common`.**
+- `Murmur3` + `Partitioner`: key → partition. The push job, nodes and client all call this one function. It's tested against the published MurmurHash3 vectors, because if two components ever disagree on a key's partition, reads silently miss.
+- `StoredValue`: the value as stored, `[flags][ts][sourceId][value]`, with a **total order** (ts, then sourceId, then tombstone, then value bytes). Why total: replicas that receive the same updates in different orders must end with identical values, so ties need a deterministic winner.
+- `ObjectStore` / `LocalObjectStore`: an S3-shaped blob store. Writes go to a temp file and are renamed, so readers never see half-written objects.
+- `VersionManifest` (protobuf, stored as JSON): which SST files make up a version, its type (FULL/DELTA), its base version, and its **watermark**. The manifest is written *last*: a version exists only once its manifest does (the commit point).
+- `UpdateLog` / `InMemoryUpdateLog`: the Kafka-shaped stream (ADR 0001). It has `offsetForTime`, the equivalent of Kafka `offsetsForTimes`, used later for replay.
+
+**Step 2: the `sst` module.** SST table settings (Bloom filter at 10 bits/key, 16 KB blocks, LZ4) and an `SstWriter` that *checks* keys are strictly increasing.
+- **Why a separate module:** the push job (writer) and the node (reader) must agree on the format, but the push job shouldn't depend on the server.
+
+**Step 3: the push job (`push-job`).** For each partition (in parallel): scan the dataset keeping only that partition's rows, sort by unsigned bytes, write one SST with every record stamped `ts = watermark, sourceId = BATCH`, upload, and finally publish the manifest. `SyntheticDataset` generates any snapshot N deterministically from (seed, N), so experiments are reproducible and the delta push can diff N against N-1 without storing them. The delta code path is written too and is used in Phase 3.
+- **Why scan per partition:** memory stays O(N/P) instead of O(N), standing in for Spark's shuffle.
+
+**Step 4: the engine (`storage-node/.../engine`). This is the core.** See ADR 0002.
+- `PartitionVersion`: one RocksDB per (partition, version), with a reference count so it's closed only after the last in-flight read.
+- `PartitionReplica`: holds `current` (an `AtomicReference`) and a dedicated **single writer thread**. Every mutation (applying stream updates, replay, swap) runs on that thread, so last-writer-wins read-compare-write needs no locks.
+- `StoreEngine`: turns a manifest into prepared partition versions (download the chain through `FileCache`, ingest), then swaps.
+- `RocksResources`: one block cache and one write-buffer budget for all instances.
+- **Learn:** `AtomicReference` + CAS loops (`tryAcquire`); why closing a JNI resource under a reader crashes the JVM; `ingestExternalFile` and hard links (`Files.createLink`); `CompletableFuture.supplyAsync(...).thenCompose(...)` to chain "load off-thread, then install on the worker".
+
+**Step 5: the gRPC service on the engine.** `StorageNodeService` now takes a `KeyLookup` (the Phase 0 map constructor stays, and those tests still pass). It also:
+- returns `version` and `ServerFeedback` (queue depth, service time) on every response;
+- maps "partition not hosted / not loaded" to `UNAVAILABLE`, so clients fail over;
+- skips work for already-cancelled calls.
+
+`StorageNode` serves on a fixed platform-thread pool (see the Phase 0 note on virtual threads and JNI).
+
+**Step 6: tests.**
+- Unit tests for the codec order, Murmur vectors, partition balance and log offsets.
+- Engine tests: every key of a pushed version is served correctly; and **swap stress**, where 4 reader threads verify every value while the store swaps versions 6 times (each swap closes a RocksDB under live readers). There were no errors or wrong values.
+
+**Step 7: benchmark tooling (`bench`)**:
+- `ZipfianGenerator` (Gray et al.);
+- `OpenLoopLoad`, a fixed-rate sender that measures from the *intended* send time to avoid coordinated omission;
+- the `phase1` experiment.
+
+**Bug found while running it:** the first run showed 100% errors, because the experiment never called `store.host(p)`, so `load()` loaded nothing. I fixed it and made the experiment **abort if any request errors**, so a broken run can't produce a "result".
+
+**Step 8: results** (`docs/experiments/phase1-baseline.md`):
+- push of 1M keys: 3.4 s;
+- **ingest: 0.17 s**, because hard-linked SSTs mean no rewrite;
+- p50 about 0.15 ms and p99 about 0.4–1.2 ms up to 20k req/s, with saturation at 40k (client and server share 8 threads);
+- the swap under load costs a p99 blip of 0.38 → 0.76 ms for one second, with zero errors.

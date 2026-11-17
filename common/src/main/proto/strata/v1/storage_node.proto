@@ -13,7 +13,7 @@ service StorageNode {
 }
 
 message GetRequest {
-  // Logical store name. Ignored until multiple stores exist (Phase 4).
+  // Logical store name. Empty means the node's default store.
   string store = 1;
   bytes key = 2;
 }
@@ -22,6 +22,8 @@ message GetResponse {
   bool found = 1;
   bytes value = 2;
   ServerFeedback feedback = 3;
+  // Version of the partition that answered (0 in Phase 0).
+  uint64 version = 4;
 }
 
 message BatchGetRequest {
@@ -39,6 +41,7 @@ message KeyValue {
   bytes key = 1;
   bool found = 2;
   bytes value = 3;
+  uint64 version = 4;
 }
 
 // Load signals piggybacked on every response so the client can score

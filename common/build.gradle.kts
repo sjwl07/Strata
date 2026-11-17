@@ -8,6 +8,7 @@ plugins {
 
 dependencies {
     api(libs.protobuf.java)
+    api(libs.protobuf.java.util)
     api(libs.grpc.protobuf)
     api(libs.grpc.stub)
     compileOnly(libs.tomcat.annotations)

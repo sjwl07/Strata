@@ -1,6 +1,10 @@
 [versions]
 grpc = "1.68.1"
 protobuf = "3.25.5"
+rocksdb = "9.7.3"
+hdrhistogram = "2.2.2"
+kafka = "3.8.1"
+testcontainers = "1.20.3"
 
 [libraries]
 grpc-netty-shaded = { module = "io.grpc:grpc-netty-shaded", version.ref = "grpc" }
@@ -8,6 +12,13 @@ grpc-protobuf = { module = "io.grpc:grpc-protobuf", version.ref = "grpc" }
 grpc-stub = { module = "io.grpc:grpc-stub", version.ref = "grpc" }
 grpc-inprocess = { module = "io.grpc:grpc-inprocess", version.ref = "grpc" }
 protobuf-java = { module = "com.google.protobuf:protobuf-java", version.ref = "protobuf" }
+protobuf-java-util = { module = "com.google.protobuf:protobuf-java-util", version.ref = "protobuf" }
+grpc-services = { module = "io.grpc:grpc-services", version.ref = "grpc" }
+rocksdbjni = { module = "org.rocksdb:rocksdbjni", version.ref = "rocksdb" }
+hdrhistogram = { module = "org.hdrhistogram:HdrHistogram", version.ref = "hdrhistogram" }
+kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
+testcontainers-kafka = { module = "org.testcontainers:kafka", version.ref = "testcontainers" }
+testcontainers-junit = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
 # Needed for @javax.annotation.Generated in gRPC-generated code.
 tomcat-annotations = { module = "org.apache.tomcat:annotations-api", version = "6.0.53" }
 

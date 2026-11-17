@@ -1,11 +1,14 @@
 plugins {
     id("strata.java-conventions")
+    `java-library`
     application
 }
 
 dependencies {
-    implementation(project(":common"))
+    api(project(":common"))
+    api(project(":sst"))
     implementation(libs.grpc.netty.shaded)
+    testImplementation(project(":push-job"))
     testImplementation(libs.grpc.inprocess)
 }
 

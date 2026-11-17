@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package strata.v1;
+
+option java_multiple_files = true;
+option java_package = "io.strata.proto.v1";
+
+// Describes one pushed version of a store. Written by the push job next to the
+// SST files in the object store (as JSON, so humans can read it).
+message VersionManifest {
+  string store = 1;
+  uint64 version = 2;
+  PushType type = 3;
+  // For DELTA pushes: the version whose files this delta is layered on.
+  uint64 base_version = 4;
+  // Event-time cutoff the snapshot reflects: every update with ts <= watermark
+  // is already folded into this version.
+  int64 watermark_ts = 5;
+  uint32 num_partitions = 6;
+  repeated PartitionFiles partitions = 7;
+  // Statistics recorded by the push job (for Q1).
+  PushStats stats = 8;
+}
+
+enum PushType {
+  PUSH_TYPE_UNSPECIFIED = 0;
+  FULL = 1;
+  DELTA = 2;
+}
+
+message PartitionFiles {
+  uint32 partition = 1;
+  // Files of *this* push only. A DELTA's full file list is the base chain plus these.
+  repeated FileRef files = 2;
+}
+
+message FileRef {
+  // Object-store key, relative to the store root.
+  string object_key = 1;
+  uint64 size_bytes = 2;
+  uint64 entries = 3;
+}
+
+message PushStats {
+  uint64 records_written = 1;
+  uint64 upserts = 2;
+  uint64 deletes = 3;
+  uint64 bytes_written = 4;
+  uint64 build_millis = 5;
+}
