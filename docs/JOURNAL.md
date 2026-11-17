@@ -175,3 +175,36 @@ The skew row is the interesting one: correct code with a wrong operational assum
 
 The crossover is therefore a bandwidth question: a delta wins when the bandwidth per copy is below about (1 − f) × 57 MB/s. That covers cross-region transfers, many replicas sharing one object store, and egress-priced clouds. Stacking 8 deltas didn't measurably slow point reads, thanks to Bloom filters.
 - **Learn:** report what you measured even when it contradicts the hypothesis. The useful output of Q1 is the crossover *formula*, not "deltas are good".
+
+## Phase 4: Controller, placement, replication, failover
+
+**Step 1: the controller protocol** (`controller.proto`): `Heartbeat`, `GetClusterView`, `CreateStore`, `StartPush`, `GetPushStatus`. The key design choice is that **the heartbeat is level-triggered**: a node reports *everything* about its replicas, and the reply is *everything* it should be doing (ADR 0005).
+- **Why:** with "do X" commands, one lost or duplicated message leaves a node wrong forever. With "here is the desired state", the next heartbeat repairs any loss. It's the same idea as Kubernetes controllers.
+
+**Step 2: `ControllerState`**, all decisions in one synchronized class with an injectable clock (no I/O, so unit tests drive time directly):
+- liveness by heartbeat timeout;
+- **rendezvous (HRW) hashing** for placement: the top-RF live nodes by `hash(node, store, partition)`;
+- the push gate: serving flips only when every live assigned replica has the target prepared.
+
+Tests cover RF distinct replicas, balance, minimal movement when a node dies, the push gate, a dead replica not blocking a push, superseded pushes, and readiness in the view.
+- **Small surprise:** HRW balance with 12 partitions over 5 nodes ranged from 2 to 9 replicas per node. That's normal for hashing (it balances in expectation), so the test now checks balance at 240 partitions, and ADR 0005 says to use many partitions per node.
+
+**Step 3: `ClusterAgent` (node side).** Every tick it heartbeats, then reconciles each assigned partition:
+1. not on the serving version → swap if it's already prepared, otherwise prepare it (this also covers bootstrap after a restart or a rebalance);
+2. on the serving version and a push is in progress → prepare the target;
+3. partitions no longer assigned → drop.
+
+An in-flight map prevents starting the same load twice. `PartitionReplica.preparedVersion()` is now visible so the node can report it.
+
+**Step 4: `StorageNodeMain` (real cluster mode)** with `--controller` and optional `--kafka`. Without Kafka, stores are batch-only.
+
+**Step 5: `local-cluster`**: a controller plus N nodes in one JVM, each with its own Netty server on a loopback port, a shared in-memory log, and `kill` (abrupt stop + disk thrown away) / `restart` (same id and port, empty disk).
+- **Why:** it's the test bed for Phases 4–5, the experiments and the quickstart, all without Docker.
+
+**Step 6: Phase 4 exit test** (`ClusterFailoverTest`): 5 nodes, RF=3, 6 partitions, a producer streaming about 5,000 updates (10% deletes). During the run:
+- push v2, with n2 killed while replicas prepare it (the push completes anyway);
+- kill n4 mid-stream;
+- bring both back empty;
+- push v3 while they bootstrap.
+
+After quiescing, **every replica of every partition** is read for every key (1,200 replica-key checks) and compared with the true newest value: **0 wrong**. Rejoined nodes converge exactly through bootstrap = SST + replay from the watermark.

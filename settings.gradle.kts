@@ -7,6 +7,8 @@ include(
     "push-job",
     "storage-node",
     "kafka-log",
+    "controller",
+    "local-cluster",
     "checker",
     "bench",
 )

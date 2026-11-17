@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package strata.v1;
+
+option java_multiple_files = true;
+option java_package = "io.strata.proto.v1";
+
+// Cluster metadata service. Nodes heartbeat; clients poll the cluster view;
+// push jobs announce new versions. All coordination is level-triggered: every
+// heartbeat response carries the full desired state, so a lost message is
+// repaired by the next one.
+service Controller {
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc GetClusterView(ClusterViewRequest) returns (ClusterView);
+  rpc CreateStore(StoreSpec) returns (CreateStoreResponse);
+  rpc StartPush(StartPushRequest) returns (PushStatus);
+  rpc GetPushStatus(PushStatusRequest) returns (PushStatus);
+}
+
+message StoreSpec {
+  string name = 1;
+  uint32 num_partitions = 2;
+  uint32 replication_factor = 3;
+  // NAIVE | LWW | FULL
+  string merge_mode = 4;
+  int64 max_clock_skew_ms = 5;
+}
+
+message CreateStoreResponse {}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  string address = 2;
+  repeated ReplicaStatus replicas = 3;
+}
+
+message ReplicaStatus {
+  string store = 1;
+  uint32 partition = 2;
+  // Version being served (0 = none yet).
+  uint64 current_version = 3;
+  // Version loaded, caught up and waiting for the swap (0 = none).
+  uint64 prepared_version = 4;
+  // Log records not yet applied.
+  uint64 lag = 5;
+}
+
+message HeartbeatResponse {
+  repeated StoreAssignment stores = 1;
+}
+
+message StoreAssignment {
+  StoreSpec spec = 1;
+  // Partitions this node should host.
+  repeated uint32 partitions = 2;
+  // Version replicas should serve.
+  uint64 serving_version = 3;
+  // Version being pushed: prepare it, but don't serve it yet (0 = no push).
+  uint64 target_version = 4;
+}
+
+message ClusterViewRequest {}
+
+message ClusterView {
+  // Increases whenever membership, assignment or serving versions change.
+  uint64 epoch = 1;
+  repeated StoreView stores = 2;
+}
+
+message StoreView {
+  StoreSpec spec = 1;
+  uint64 serving_version = 2;
+  repeated PartitionView partitions = 3;
+}
+
+message PartitionView {
+  uint32 partition = 1;
+  repeated ReplicaView replicas = 2;
+}
+
+message ReplicaView {
+  string node_id = 1;
+  string address = 2;
+  // Serving the store's serving version (safe to route reads to).
+  bool ready = 3;
+  uint64 current_version = 4;
+}
+
+message StartPushRequest {
+  string store = 1;
+  uint64 version = 2;
+}
+
+message PushStatusRequest {
+  string store = 1;
+  uint64 version = 2;
+}
+
+message PushStatus {
+  string store = 1;
+  uint64 version = 2;
+  // PENDING (replicas preparing), SERVING (swapped), SUPERSEDED, UNKNOWN
+  string state = 3;
+  uint32 partitions_ready = 4;
+  uint32 partitions_total = 5;
+}
