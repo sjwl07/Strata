@@ -40,6 +40,7 @@ import org.rocksdb.RocksDBException;
 public final class PartitionReplica implements AutoCloseable {
 
   private static final int READ_BATCH = 1000;
+  private static final Duration REPLAY_STALL_TIMEOUT = Duration.ofSeconds(30);
 
   private final String store;
   private final int partition;
@@ -241,7 +242,13 @@ public final class PartitionReplica implements AutoCloseable {
         replayTo = replayFrom; // NAIVE / LWW: no replay; updates between cutoff and now are lost
       }
       long start = System.nanoTime();
-      long n = replay(v, replayFrom, replayTo);
+      long n;
+      try {
+        n = replay(v, replayFrom, replayTo);
+      } catch (RuntimeException e) {
+        v.retire(); // never install a version that missed updates; the caller may retry
+        throw e;
+      }
       lastReplayRecords = n;
       lastReplayMicros = (System.nanoTime() - start) / 1000;
       if (cur == null) {
@@ -254,16 +261,20 @@ public final class PartitionReplica implements AutoCloseable {
     return null;
   }
 
+  /**
+   * Applies log records {@code [from, to)} to {@code v}. Keeps polling until it reaches {@code to}:
+   * an empty read does NOT mean "no more records" (Kafka's poll returns empty while a fetch is in
+   * flight). Stopping early would silently swap in a version missing updates, so a stalled replay
+   * fails the prepare instead.
+   */
   private long replay(PartitionVersion v, long from, long to) {
     long n = 0;
     long off = from;
+    long deadline = System.nanoTime() + REPLAY_STALL_TIMEOUT.toNanos();
     try {
       while (off < to) {
         List<LogRecord> batch =
-            log.read(partition, off, (int) Math.min(READ_BATCH, to - off), Duration.ZERO);
-        if (batch.isEmpty()) {
-          break;
-        }
+            log.read(partition, off, (int) Math.min(READ_BATCH, to - off), Duration.ofMillis(100));
         for (LogRecord r : batch) {
           if (r.offset() >= to) {
             break;
@@ -272,9 +283,18 @@ public final class PartitionReplica implements AutoCloseable {
           off = r.offset() + 1;
           n++;
         }
+        if (batch.isEmpty() && System.nanoTime() > deadline) {
+          throw new IllegalStateException(
+              "partition %d: replay stalled at offset %d of [%d, %d)"
+                  .formatted(partition, off, from, to));
+        }
+        if (!batch.isEmpty()) {
+          deadline = System.nanoTime() + REPLAY_STALL_TIMEOUT.toNanos(); // progress: reset
+        }
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      throw new IllegalStateException("replay interrupted", e);
     }
     return n;
   }

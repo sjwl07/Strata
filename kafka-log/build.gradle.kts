@@ -8,4 +8,5 @@ dependencies {
     api(libs.kafka.clients)
     testImplementation(libs.testcontainers.kafka)
     testImplementation(libs.testcontainers.junit)
+    testRuntimeOnly(libs.slf4j.simple)
 }

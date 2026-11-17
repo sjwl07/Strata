@@ -19,13 +19,13 @@
 ## Deviations from `PLAN.md` (and why)
 | Plan | What was built | Why |
 |---|---|---|
-| Kafka, MinIO and Spark in Docker | Interfaces + local implementations; real Kafka adapter tested via Testcontainers in CI | No Docker daemon on the dev machine (ADR 0001) |
+| Kafka, MinIO and Spark in Docker | Kafka: real, verified with Testcontainers and docker-compose. MinIO: a shared directory/volume. Experiments: in-memory log | Docker was unavailable at first (ADR 0001); Kafka verified once it was started |
 | Spark push job | Plain-Java push job doing the same steps | Spark 3.5 doesn't support Java 21; too heavy for the disk |
 | 50–100M keys | 0.1–1M keys | ~8 GB free disk, ~2 GB free RAM |
 | jqwik property tests | Seeded random history generator + oracle (same idea, reproducible by seed) | Fewer dependencies; failing seeds are printed |
 | toxiproxy network faults | Server-side `ServeHook` faults (slow disk, pauses, noisy neighbours) | No Docker; server-side faults also create real queueing |
 | async-profiler flame graphs | JMH with the GC and stack profilers on the read path | Not installed; JMH profilers gave the actionable result |
-| Separate processes for the chaos test | In-JVM `LocalCluster` with abrupt kill + disk loss; one manual multi-process smoke test | Same failure semantics, deterministic in CI |
+| Separate processes for the chaos test | In-JVM `LocalCluster` with abrupt kill + disk loss in CI; manual runs with separate JVMs and with docker-compose (SIGKILL + recovery) | Same failure semantics, deterministic in CI |
 
 ## Ideas for later (stretch)
 - Controller HA (etcd/jetcd lease) and persisted store specs and versions.
@@ -56,4 +56,8 @@
   - a flawed apply-throughput measurement;
   - a GC flag conflict;
   - a demo race.
+- After you started Docker:
+  - upgraded Testcontainers (Docker 29 API) so all 41 tests now run, 0 skipped;
+  - **real Kafka exposed a replay bug** (empty poll treated as end-of-log), now fixed with a deterministic regression test;
+  - docker-compose verified end to end (`deploy/README.md`).
 - Housekeeping on your machine: deleted the DIP Claude session folders at your request (about 2.4 GB). Gradle caches about 0.9 GB in `~/.gradle`.

@@ -24,6 +24,10 @@ public interface UpdateLog extends AutoCloseable {
   /**
    * Up to {@code max} records starting at {@code fromOffset}; waits up to {@code timeout} if none
    * are available yet. Returns an empty list on timeout.
+   *
+   * <p><b>An empty result does not mean the log has no more records</b>: Kafka returns empty while
+   * a fetch is in flight. Callers that need everything up to an offset must keep reading until they
+   * reach it (see {@code PartitionReplica.replay}).
    */
   List<LogRecord> read(int partition, long fromOffset, int max, Duration timeout)
       throws InterruptedException;

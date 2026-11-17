@@ -1,13 +1,8 @@
-# Multi-process Strata with a real Kafka broker. NOTE: written for machines with Docker; it was not
-# run on the development machine (no Docker daemon there, see ADR 0001). The in-process equivalent,
-# which is what the tests and experiments use, is `bench demo` / LocalCluster.
+# Multi-process Strata with a real Kafka broker: controller, 3 storage nodes, Kafka (KRaft).
+# Verified end to end on 2026-11-17 (see deploy/README.md for the walkthrough).
 #
 #   ./gradlew :controller:installDist :storage-node:installDist :push-job:installDist :bench:installDist
-#   docker compose -f deploy/docker-compose.yml up --build
-#   # create a store and push a version (from another shell):
-#   docker compose -f deploy/docker-compose.yml run --rm tools push-job \
-#       --objects=/objects --store=demo --partitions=8 --version=1 --synthetic-keys=100000
-#   (then StartPush through the controller API, e.g. with grpcurl -plaintext localhost:7000 ...)
+#   docker compose -f deploy/docker-compose.yml up -d --build
 services:
   kafka:
     image: apache/kafka:3.8.1
@@ -17,17 +12,24 @@ services:
       KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_LOG_RETENTION_HOURS: 48   # must exceed cutoff-to-swap delay + skew (ADR 0004)
+      KAFKA_HEAP_OPTS: "-Xmx512m -Xms256m"
 
   controller:
     build: { context: .., dockerfile: deploy/Dockerfile }
+    image: strata:0.1
+    environment: { JAVA_OPTS: "-Xmx256m" }
     command: controller --port=7000 --node-timeout-ms=3000
     ports: ["7000:7000"]
 
   node1: &node
-    build: { context: .., dockerfile: deploy/Dockerfile }
+    image: strata:0.1
+    environment: { JAVA_OPTS: "-Xmx384m" }
     command: >
       storage-node --node-id=node1 --host=node1 --port=7101 --data-dir=/data
       --objects=/objects --controller=controller:7000 --kafka=kafka:9092
@@ -48,7 +50,8 @@ services:
     ports: ["7103:7101"]
 
   tools:
-    build: { context: .., dockerfile: deploy/Dockerfile }
+    image: strata:0.1
+    environment: { JAVA_OPTS: "-Xmx384m" }
     profiles: ["tools"]
     volumes: ["objects:/objects"]
 

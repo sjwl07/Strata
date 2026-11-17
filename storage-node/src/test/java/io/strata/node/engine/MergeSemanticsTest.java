@@ -22,7 +22,9 @@ class MergeSemanticsTest {
 
   @TempDir Path tmp;
   final AtomicLong clock = new AtomicLong();
-  final InMemoryUpdateLog log = new InMemoryUpdateLog(1, clock::get);
+  // The first read at each offset comes back empty although records exist, like Kafka's poll.
+  // Found the hard way: replay used to stop at the first empty read (journal, "Real Kafka").
+  final InMemoryUpdateLog log = new InMemoryUpdateLog(1, clock::get, true);
 
   EngineFixture fixture(MergeMode mode) throws Exception {
     return new EngineFixture(tmp, new StoreEngine.Config("s", 1, mode, 0, false), log);

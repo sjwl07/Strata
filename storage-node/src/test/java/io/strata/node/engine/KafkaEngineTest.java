@@ -69,10 +69,10 @@ class KafkaEngineTest {
         r = engine.get("ravi".getBytes(StandardCharsets.UTF_8));
       } while (!new String(r.value(), StandardCharsets.UTF_8).equals("222")
           && System.nanoTime() < deadline);
+      engine.close(); // stop partition workers before the log closes their consumers
+      loader.shutdownNow();
       assertThat(r.version()).isEqualTo(2);
       assertThat(new String(r.value(), StandardCharsets.UTF_8)).isEqualTo("222");
-      engine.close();
-      loader.shutdownNow();
     }
   }
 }

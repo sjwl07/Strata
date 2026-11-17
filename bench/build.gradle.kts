@@ -8,6 +8,7 @@ dependencies {
     implementation(project(":common"))
     implementation(project(":push-job"))
     implementation(project(":storage-node"))
+    implementation(project(":kafka-log"))
     implementation(project(":checker"))
     implementation(project(":client"))
     implementation(project(":fault"))

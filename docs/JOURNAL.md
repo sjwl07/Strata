@@ -286,3 +286,22 @@ After quiescing, **every replica of every partition** is read for every key (1,2
 - When does hedging hurt? Why does the token bucket need burst capacity?
 - In Q1, why did the full push win on time even though it ships 100× more bytes?
 - What does an open-loop load generator protect against (coordinated omission)?
+
+## Running with real Docker and Kafka (2026-11-17, later)
+
+You started the Docker daemon, so the parts built "blind" could be tested for real.
+
+**Step 1: make Testcontainers work.** The Kafka tests were still skipped. Testcontainers logs through SLF4J, and with no logging backend its errors were invisible, so I added `slf4j-simple` to the test classpath. The real error was then visible: `client version 1.32 is too old. Minimum supported API version is 1.44`. Docker 29 dropped old API versions, so I upgraded Testcontainers from 1.20.3 to 1.21.4.
+
+**Step 2: a real bug that only real Kafka showed.** The Kafka log contract test passed, but `KafkaEngineTest` (the Ravi scenario through the engine) **failed**: after the swap, ravi was 111, so the update was lost.
+- **Cause:** `PartitionReplica.replay` read with a zero timeout and stopped at the first empty result. The in-memory log always returns the available records, but **Kafka's `poll` returns empty while a fetch is in flight**. So against Kafka, replay-before-swap could replay nothing, the exact anomaly the design exists to prevent. Bootstrap had the same flaw: it could skip records.
+- **Fix:** replay keeps polling until it reaches its target offset. If it makes no progress for 30 s, it throws, and the version is *not* installed (fail loudly instead of swapping in a version that's missing updates). The `UpdateLog.read` Javadoc now states that empty ≠ end of log.
+- **Regression test without Docker:** `InMemoryUpdateLog` got an `emptyFirstRead` mode, where the first read at any offset returns empty and a retry returns the data, exactly Kafka's behaviour. `MergeSemanticsTest` uses it. I checked that the test is meaningful by putting the bug back temporarily: 2 scenarios failed on every run, and they pass with the fix. A first random-based version caught the bug only 2 times in 3, which isn't good enough for a regression test.
+- The experiments are unaffected because they used the in-memory log, which never returned empty while data existed.
+- **Learn:** a test double must reproduce the semantics your code *relies on*, not just the happy path. "Empty read" meant "end of log" in the double and "try again" in reality.
+
+**Step 3: docker-compose for real.** Kafka (KRaft), a controller and 3 nodes as separate containers, plus a new `bench produce` command to write stream updates to Kafka.
+- Walkthrough (`deploy/README.md`): push v1 → stream ravi=222 through Kafka → push v2 whose snapshot predates the update → **ravi stays 222** → `docker kill` (SIGKILL) node1 → reads still correct → restart → node1 serving again in about 2 s.
+- Small compose fixes: Kafka listener security map, heap limits for all JVMs, one shared image.
+
+**Result:** `./gradlew build` runs **41 tests, 0 skipped, 0 failed**.

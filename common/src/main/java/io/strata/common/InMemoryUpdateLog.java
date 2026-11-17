@@ -19,17 +19,28 @@ public final class InMemoryUpdateLog implements UpdateLog {
 
   private final Part[] parts;
   private final LongSupplier clock;
+  private final boolean emptyFirstRead;
 
   public InMemoryUpdateLog(int numPartitions) {
     this(numPartitions, System::currentTimeMillis);
   }
 
   public InMemoryUpdateLog(int numPartitions, LongSupplier clock) {
+    this(numPartitions, clock, false);
+  }
+
+  /**
+   * @param emptyFirstRead if true, the first read at any offset returns nothing even though records
+   *     are available, and a retry returns them. That's what Kafka's {@code poll} does while a
+   *     fetch is in flight. Tests use it to make sure no code treats an empty read as "end of log".
+   */
+  public InMemoryUpdateLog(int numPartitions, LongSupplier clock, boolean emptyFirstRead) {
     this.parts = new Part[numPartitions];
     for (int i = 0; i < numPartitions; i++) {
       parts[i] = new Part();
     }
     this.clock = clock;
+    this.emptyFirstRead = emptyFirstRead;
   }
 
   private static final class Part {
@@ -37,6 +48,7 @@ public final class InMemoryUpdateLog implements UpdateLog {
     final Condition appended = lock.newCondition();
     final List<LogRecord> records = new ArrayList<>();
     long lastAppendTime = Long.MIN_VALUE;
+    final java.util.Set<Long> fetched = new java.util.HashSet<>();
   }
 
   @Override
@@ -64,6 +76,18 @@ public final class InMemoryUpdateLog implements UpdateLog {
   public List<LogRecord> read(int partition, long fromOffset, int max, Duration timeout)
       throws InterruptedException {
     Part p = parts[partition];
+    if (emptyFirstRead) {
+      boolean firstTime;
+      p.lock.lock();
+      try {
+        firstTime = fromOffset < p.records.size() && p.fetched.add(fromOffset);
+      } finally {
+        p.lock.unlock();
+      }
+      if (firstTime) {
+        return Collections.emptyList(); // "fetch in flight"
+      }
+    }
     long deadline = System.nanoTime() + timeout.toNanos();
     p.lock.lock();
     try {

@@ -12,6 +12,7 @@ dependencies {
     testImplementation(project(":push-job"))
     testImplementation(libs.testcontainers.kafka)
     testImplementation(libs.testcontainers.junit)
+    testRuntimeOnly(libs.slf4j.simple)
     testImplementation(libs.grpc.inprocess)
 }
 

@@ -110,7 +110,14 @@ controller/build/install/controller/bin/strata-admin start-push --store=demo --v
 bench/build/install/bench/bin/bench get --controller=localhost:7000 --store=demo --key=ravi
 ```
 
-Pass `--kafka=host:9092` to the storage nodes to enable streaming updates, and `--delta-from=old.tsv` to the push job to publish a delta. [`deploy/docker-compose.yml`](deploy/docker-compose.yml) sketches the full topology with Kafka.
+Pass `--kafka=host:9092` to the storage nodes to enable streaming updates, and `--delta-from=old.tsv` to the push job to publish a delta.
+
+</details>
+
+<details>
+<summary><b>Running with Docker Compose and Kafka</b></summary>
+
+[`deploy/`](deploy/README.md) runs Kafka, a controller and three storage nodes in separate containers, with a walkthrough of the stream-update-survives-swap scenario and a node being killed and recovering.
 
 </details>
 
@@ -160,7 +167,7 @@ Kafka integration tests use Testcontainers. They run wherever Docker is availabl
 ## Scope and limitations
 
 - **Single-machine experiments.** The multi-node cluster runs in one JVM over loopback gRPC with datasets of 0.1–1M keys. The relative results and the mechanisms are what carry over; absolute numbers will differ in production.
-- **Local stand-ins for external systems.** Kafka, S3 and Spark sit behind interfaces ([ADR 0001](docs/adr/0001-local-substitutes-for-kafka-minio-spark.md)). The Kafka adapter is a real implementation tested in CI, the object store is a shared directory, and the push job is plain Java performing the steps a Spark job would.
+- **Local stand-ins for some external systems.** S3 and Spark sit behind interfaces ([ADR 0001](docs/adr/0001-local-substitutes-for-kafka-minio-spark.md)): the object store is a shared directory, and the push job is plain Java performing the steps a Spark job would. Kafka is real in the Docker setup and the integration tests; the experiments use an in-memory log with the same semantics.
 - **Not yet implemented:** controller high availability, C3's rate control, per-field merges and Iceberg input. See the roadmap in [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
 ## Documentation
