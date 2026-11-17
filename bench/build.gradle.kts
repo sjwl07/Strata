@@ -12,5 +12,6 @@ dependencies {
 jmh {
     jmhVersion = "1.37"
     providers.gradleProperty("jmh.includes").orNull?.let { includes = listOf(it) }
+    providers.gradleProperty("jmh.threads").orNull?.let { threads = it.toInt() }
     resultFormat = "JSON"
 }

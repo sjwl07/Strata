@@ -30,3 +30,25 @@ Format of each entry:
 5. **Experiment sizes are scaled down** (about 1M keys), and every write-up states the hardware.
 
 ---
+
+## Phase 0: Java warm-up exercises
+
+**Step 1: finish Exercise 1** (`StorageNodeService`, `StorageNodeMain`). I started from your draft of `get` and applied the six review points from last session:
+1. Added the package and imports. `StorageNodeImplBase` is a nested class, so it's `StorageNodeGrpc.StorageNodeImplBase`.
+2. Set `found`.
+3. Return `Status.INVALID_ARGUMENT`.
+4. Removed the redundant else branch.
+5. `Map.copyOf` in the constructor.
+6. Implemented `batchGet`, which validates all keys before answering.
+
+The 5 acceptance tests pass.
+- **Why:** this is the shape of the read API for the rest of the project. In Phase 1 the map is replaced by the versioned RocksDB engine behind the same gRPC methods.
+- **Learn:** proto3 default values (why `found` exists); `StreamObserver` (`onNext` then `onCompleted`, or `onError` exactly once); why `Status...asRuntimeException()` matters (any other exception becomes `UNKNOWN` on the client).
+
+**Step 2: Exercise 2, the JMH map benchmark.** Results and the explanation are in `docs/notes/phase0-jmh.md`. ConcurrentHashMap scales to about 2.3× at 8 threads, while every lock-based design gets *slower* with more threads. I added a `-Pjmh.threads=N` switch to `bench/build.gradle.kts`.
+- **Why:** it sets the design rule for the hot read path: no shared writes per request.
+
+**Step 3: Exercise 3, the concept note** (`docs/notes/phase0-concepts.md`): happens-before, virtual threads, and `CompletableFuture`. Each part ends with the Strata design decision it drives:
+- an `AtomicReference` version pointer;
+- a bounded platform-thread pool for reads, because RocksDB JNI calls pin virtual threads;
+- client callbacks moved off the gRPC threads.
